@@ -2,6 +2,13 @@
   <img src="assets/logo.svg" alt="MLEvolve" width="400"/>
 </p>
 
+> [!NOTE]
+> This repository is a Windows/Codex CLI compatibility adaptation of
+> [InternScience/MLEvolve](https://github.com/InternScience/MLEvolve). It keeps
+> the original search, execution, and evaluation flow while adding optional
+> `codex exec` support for ChatGPT-authenticated local runs and a Windows
+> fallback when POSIX CPU-affinity APIs are unavailable.
+
 <p align="center">
   <a href="https://arxiv.org/abs/2606.06473"><img src="https://img.shields.io/badge/arXiv-2606.06473-b31b1b.svg" alt="arXiv"></a>
   <a href="https://huggingface.co/papers/2606.06473"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Paper-yellow.svg" alt="Hugging Face"></a>
@@ -169,6 +176,30 @@ bash run_single_task.sh denoising-dirty-documents /mle-bench/data 1
 ```
 
 Results are written to `./runs/<timestamp>_<exp_id>/` including search tree logs, best solution code, and top-K candidate submissions.
+
+### Codex CLI backend (optional)
+
+Install and authenticate the Codex CLI, then provide the executable command as
+a JSON string array. Prefix the configured model with `codex:` to select this
+backend. On Windows, using the Node executable and installed Codex entrypoint
+directly avoids inaccessible WindowsApps shims.
+
+```powershell
+$env:MLEVOLVE_CODEX_COMMAND = @(
+  "C:\path\to\node.exe",
+  "C:\path\to\node_modules\@openai\codex\bin\codex.js"
+) | ConvertTo-Json -Compress
+$env:MLEVOLVE_CODEX_REASONING_EFFORT = "medium"
+
+python run.py `
+  agent.code.model=codex:gpt-5.6-sol `
+  agent.feedback.model=codex:gpt-5.6-sol `
+  '<other MLEvolve task arguments>'
+```
+
+The adapter invokes `codex exec` in an ephemeral, read-only sandbox and maps
+MLEvolve function-call schemas to Codex structured output. API keys and base
+URLs are not used by this backend; authentication is handled by the Codex CLI.
 
 ## Acknowledgments
 

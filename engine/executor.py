@@ -197,14 +197,18 @@ class Interpreter:
         proc = None
         
         try:
-            cpu_number_per_session = max(1, int(self.cpu_number / self.max_parallel_run))
-            avail_cpus = sorted(os.sched_getaffinity(0))
-            start = process_id * cpu_number_per_session
-            cpu_set = set(avail_cpus[start:start + cpu_number_per_session])
-            if not cpu_set:
-                cpu_set = set(avail_cpus)
-            logger.info(f"has set process_id:{process_id} to use cpu: {cpu_set}")
-            pre_code = "import os\nos.sched_setaffinity(0, {cpu_set})\n".format(cpu_set=cpu_set)
+            pre_code = ""
+            if hasattr(os, "sched_getaffinity") and hasattr(os, "sched_setaffinity"):
+                cpu_number_per_session = max(1, int(self.cpu_number / self.max_parallel_run))
+                avail_cpus = sorted(os.sched_getaffinity(0))
+                start = process_id * cpu_number_per_session
+                cpu_set = set(avail_cpus[start:start + cpu_number_per_session])
+                if not cpu_set:
+                    cpu_set = set(avail_cpus)
+                logger.info(f"has set process_id:{process_id} to use cpu: {cpu_set}")
+                pre_code = "import os\nos.sched_setaffinity(0, {cpu_set})\n".format(cpu_set=cpu_set)
+            else:
+                logger.info("CPU affinity APIs unavailable; running without process pinning")
 
             code = self.isolate_submission_path(code=code, _id=id)
             code = self.isolate_model_path(code=code, _id=id)
