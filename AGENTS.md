@@ -43,6 +43,8 @@ pwsh -NoProfile -File scripts/project.ps1 doctor -Profile base
 pwsh -NoProfile -File scripts/project.ps1 test -Profile base
 ```
 
+`.venv-profiles/` 是被 Git 忽略的本地运行产物，并且按 worktree 分别存在；某个 worktree 中的 `doctor` 或 `test` 通过不能证明其他 worktree 已具备环境。进入新的 worktree 后应先在该 worktree 执行 `bootstrap -Profile <profile>`，再执行 `doctor` 或 `test`；不要复制 profile marker，也不要仅凭另一工作区的通过记录宣称当前环境就绪。
+
 三个 requirements 文件含大量固定版本及部分偏 Linux/CUDA 的包。不要把“一次完整安装成功”当作理所当然；先按任务所需安装最小依赖，若完整安装失败，记录具体包、平台和错误，不要随意改版本掩盖兼容性问题。
 
 `base`、`ml`、`domain` 环境彼此独立，且入口用 requirements 文件哈希标记环境状态。Windows 上 `ml`/`domain` 会因固定列表包含 Linux CUDA wheel 而提前报告 `ENV_BLOCKED`；不要通过静默删包把它伪装成正式兼容环境，应在 WSL/Linux 使用，或另行评审并锁定 Windows CUDA profile。
