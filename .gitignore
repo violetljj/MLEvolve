@@ -70,6 +70,7 @@ logs/
 cache/
 scripts/*
 !scripts/project.ps1
+!scripts/remote_cpu_worker/
 workspace/
 workspaces/
 test_workspace/
