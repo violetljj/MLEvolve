@@ -1,0 +1,3 @@
+# Minimal transitive dependency required by OmegaConf/Hydra but absent from
+# requirements_base.txt because upstream installation uses --no-deps.
+antlr4-python3-runtime==4.9.3

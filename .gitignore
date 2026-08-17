@@ -18,6 +18,7 @@ sdist/
 # ===== Environments =====
 .env
 .venv
+.venv-profiles/
 env/
 venv/
 
@@ -67,7 +68,8 @@ logs/
 
 # ===== Project Specific =====
 cache/
-scripts/
+scripts/*
+!scripts/project.ps1
 workspace/
 workspaces/
 test_workspace/

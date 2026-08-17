@@ -134,6 +134,18 @@ MLEvolve powers the **coding and algorithm optimization** module within the [Int
 
 ## Setup
 
+On this Windows workstation, use the repository entry point for deterministic Python selection and profile isolation:
+
+```powershell
+pwsh -NoProfile -File scripts/project.ps1 bootstrap -Profile base
+pwsh -NoProfile -File scripts/project.ps1 doctor -Profile base
+pwsh -NoProfile -File scripts/project.ps1 test -Profile base
+```
+
+Each profile lives under `.venv-profiles/<profile>` and carries a hash marker for its pinned requirement inputs. The `ml` and `domain` lists include Linux-only CUDA packages (`nvidia-*` and `triton`), so the entry point fails early for those profiles on Windows instead of silently dropping pins. Run them in WSL/Linux or create a separately reviewed and locked Windows/CUDA profile.
+
+`requirements_entry.txt` supplies the one pinned OmegaConf/Hydra runtime dependency omitted by the upstream `--no-deps` lists. It is intentionally narrow: `uv pip check` still reports optional/platform dependencies and the upstream Streamlit/Pillow conflict, so the entry point does not claim that the broad freeze is a universally consistent lock.
+
 **1. Prepare mle-bench** — Install [mle-bench](https://github.com/openai/mle-bench) and download the dataset following its instructions.
 
 **2. Install MLEvolve dependencies**

@@ -35,18 +35,19 @@
 | NVIDIA 工具 | `C:\Windows\system32\nvidia-smi.exe` | 长运行前检查显存、驱动和进程占用 |
 | Docker 包装器 | `E:\codex-tools\bin\docker.cmd` | 使用前先确认 Docker Desktop/daemon 已启动 |
 
-推荐用仓库内 `.venv` 隔离依赖：
+统一入口使用按依赖组隔离的 `.venv-profiles/<profile>`，避免不同实验互相卸载或覆盖依赖：
 
 ```powershell
-Set-Location E:\MLEvolve
-& E:\codex-tools\bin\uv.cmd venv --python E:\codex-tools\uv-python\cpython-3.11.9-windows-x86_64-none\python.exe .venv
-& .\.venv\Scripts\Activate.ps1
-python -m pip install --no-deps -r requirements_base.txt
-python -m pip install --no-deps -r requirements_ml.txt
-python -m pip install --no-deps -r requirements_domain.txt
+pwsh -NoProfile -File scripts/project.ps1 bootstrap -Profile base
+pwsh -NoProfile -File scripts/project.ps1 doctor -Profile base
+pwsh -NoProfile -File scripts/project.ps1 test -Profile base
 ```
 
 三个 requirements 文件含大量固定版本及部分偏 Linux/CUDA 的包。不要把“一次完整安装成功”当作理所当然；先按任务所需安装最小依赖，若完整安装失败，记录具体包、平台和错误，不要随意改版本掩盖兼容性问题。
+
+`base`、`ml`、`domain` 环境彼此独立，且入口用 requirements 文件哈希标记环境状态。Windows 上 `ml`/`domain` 会因固定列表包含 Linux CUDA wheel 而提前报告 `ENV_BLOCKED`；不要通过静默删包把它伪装成正式兼容环境，应在 WSL/Linux 使用，或另行评审并锁定 Windows CUDA profile。
+
+`requirements_entry.txt` 只补齐上游 `--no-deps` 安装遗漏、且主入口必需的 OmegaConf/Hydra 运行依赖。广域 requirements 仍不是严格可解的 lock（包括可选平台依赖及 Streamlit/Pillow 冲突），不得把入口冒烟通过描述为全依赖一致。
 
 ## Codex CLI 调用
 
