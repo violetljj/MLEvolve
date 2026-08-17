@@ -1,4 +1,4 @@
-# MLEvolve × Codex Search-Value Wave R2
+# MLEvolve × Codex Search-Value Wave R2.1
 
 This directory freezes and runs the nine-task paired admission screen that follows
 the single diabetes result. The comparison is `VANILLA_CODEX` versus
@@ -10,6 +10,10 @@ froze 19 calls even though both implemented arms use two setup calls plus three
 calls for each of six candidates (20 total), and it assumed MLEvolve copied
 validation predictions into its best-submission directory. R2 changes only those
 mechanical points: 20 calls per arm and a no-LLM replay of already-selected code.
+R2 then stopped because that replay was required to match the selected test CSV
+byte-for-byte; inspection showed only roughly 1e-16 floating serialization drift.
+R2.1 keeps the original submission hash immutable and uses ID equality plus a
+`1e-12` maximum numeric replay tolerance.
 
 The protocol is intentionally fail-closed:
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import numpy as np
 
 from wave_common import (
     atomic_json,
@@ -121,6 +122,8 @@ def main() -> None:
     replay_score = None
     replay_wall = None
     replay_submission_sha256 = None
+    replay_submission_ids_match = False
+    replay_submission_max_abs_diff = None
     replay_error = None
     try:
         eligible = [
@@ -138,6 +141,13 @@ def main() -> None:
         replay_wall = replay["execution_wall_seconds"]
         replay_submission = replay_dir / "submission" / "submission.csv"
         replay_submission_sha256 = sha256(replay_submission) if replay_submission.exists() else None
+        original_frame = pd.read_csv(best_submission)
+        replay_frame = pd.read_csv(replay_submission)
+        replay_submission_ids_match = original_frame["id"].tolist() == replay_frame["id"].tolist()
+        original_values = pd.to_numeric(original_frame["prediction"], errors="coerce").to_numpy(float)
+        replay_values = pd.to_numeric(replay_frame["prediction"], errors="coerce").to_numpy(float)
+        if len(original_values) == len(replay_values) and np.isfinite(original_values).all() and np.isfinite(replay_values).all():
+            replay_submission_max_abs_diff = float(np.max(np.abs(original_values - replay_values)))
     except Exception as exc:
         replay_error = f"{type(exc).__name__}: {exc}"
     valid_arm = (
@@ -148,7 +158,9 @@ def main() -> None:
         and abs(replay_score - best_score) <= 1e-8 * max(1.0, abs(best_score))
         and usage["calls"] == protocol["expected_codex_calls_per_arm"]
         and best_submission.exists()
-        and replay_submission_sha256 == sha256(best_submission)
+        and replay_submission_ids_match
+        and replay_submission_max_abs_diff is not None
+        and replay_submission_max_abs_diff <= 1e-12
     )
     terminal = {
         "arm": "MLEVOLVE_CODEX", "task": task["slug"],
@@ -161,6 +173,8 @@ def main() -> None:
         "candidate_compute_wall_seconds": sum(float(node.get("exec_time") or 0) for node in nodes),
         "selected_code_audit_replay_wall_seconds": replay_wall,
         "selected_code_audit_replay_submission_sha256": replay_submission_sha256,
+        "selected_code_audit_replay_ids_match": replay_submission_ids_match,
+        "selected_code_audit_replay_max_abs_diff": replay_submission_max_abs_diff,
         "selected_code_audit_replay_error": replay_error,
         "usage": {key: value for key, value in usage.items() if key != "timeline"},
         "journal_sha256": sha256(journal_path),
