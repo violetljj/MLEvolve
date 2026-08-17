@@ -1,9 +1,15 @@
-# MLEvolve × Codex Search-Value Wave R1
+# MLEvolve × Codex Search-Value Wave R2
 
 This directory freezes and runs the nine-task paired admission screen that follows
 the single diabetes result. The comparison is `VANILLA_CODEX` versus
 `MLEVOLVE_CODEX` with the same Codex model, frozen task split, evaluator, candidate
 count, CPU/GPU limits, and one private-test evaluation per completed pair.
+
+R1 is terminal invalid before paired or private-test evaluation. It incorrectly
+froze 19 calls even though both implemented arms use two setup calls plus three
+calls for each of six candidates (20 total), and it assumed MLEvolve copied
+validation predictions into its best-submission directory. R2 changes only those
+mechanical points: 20 calls per arm and a no-LLM replay of already-selected code.
 
 The protocol is intentionally fail-closed:
 

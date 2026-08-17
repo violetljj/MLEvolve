@@ -88,7 +88,7 @@ class WaveHarnessTests(unittest.TestCase):
                     pd.DataFrame({"id": range(4), "prediction": prediction}).to_csv(submission, index=False)
                     receipt = {
                         "status": "VALID", "harness_git_head": "test-commit",
-                        "usage": {"calls": 19, "total_tokens": 100},
+                        "usage": {"calls": protocol["expected_codex_calls_per_arm"], "total_tokens": 100},
                         "best_submission_sha256": sha256(submission),
                         "trajectory": [baseline] * 6,
                         "candidate_checkpoints": [

@@ -19,9 +19,9 @@ from wave_common import (
     codex_usage,
     cumulative_at,
     load_protocol,
-    score_predictions,
     sha256,
 )
+from run_vanilla_arm import execute_candidate
 
 
 LOCAL_ZONE = ZoneInfo("Asia/Hong_Kong")
@@ -118,12 +118,28 @@ def main() -> None:
         })
     best_score = best_trajectory[-1] if best_trajectory else None
     best_submission = journals[0].parents[1] / "workspace" / "best_submission" / "submission.csv"
-    validation_predictions = journals[0].parents[1] / "workspace" / "best_submission" / "validation_predictions.csv"
     replay_score = None
+    replay_wall = None
+    replay_submission_sha256 = None
+    replay_error = None
     try:
-        replay_score = score_predictions(task["metric"], truth, validation_predictions)
-    except Exception:
-        pass
+        eligible = [
+            node for node, value in zip(nodes, trajectory)
+            if value is not None and abs(value - best_score) <= 1e-12 * max(1.0, abs(best_score))
+        ]
+        if not eligible:
+            raise ValueError("No journal node matches the selected best score")
+        replay_dir = arm / "selected_code_dev_replay"
+        replay = execute_candidate(
+            eligible[0]["code"], replay_dir,
+            task_root / "benchmark" / "public", python, task,
+        )
+        replay_score = replay["score"] if replay["valid"] else None
+        replay_wall = replay["execution_wall_seconds"]
+        replay_submission = replay_dir / "submission" / "submission.csv"
+        replay_submission_sha256 = sha256(replay_submission) if replay_submission.exists() else None
+    except Exception as exc:
+        replay_error = f"{type(exc).__name__}: {exc}"
     valid_arm = (
         completed.returncode == 0
         and len(nodes) == protocol["formal_candidates_per_arm"]
@@ -132,6 +148,7 @@ def main() -> None:
         and abs(replay_score - best_score) <= 1e-8 * max(1.0, abs(best_score))
         and usage["calls"] == protocol["expected_codex_calls_per_arm"]
         and best_submission.exists()
+        and replay_submission_sha256 == sha256(best_submission)
     )
     terminal = {
         "arm": "MLEVOLVE_CODEX", "task": task["slug"],
@@ -142,6 +159,9 @@ def main() -> None:
         "trajectory": trajectory, "stages": [node.get("stage") for node in nodes],
         "candidate_checkpoints": checkpoints, "wall_seconds": wall,
         "candidate_compute_wall_seconds": sum(float(node.get("exec_time") or 0) for node in nodes),
+        "selected_code_audit_replay_wall_seconds": replay_wall,
+        "selected_code_audit_replay_submission_sha256": replay_submission_sha256,
+        "selected_code_audit_replay_error": replay_error,
         "usage": {key: value for key, value in usage.items() if key != "timeline"},
         "journal_sha256": sha256(journal_path),
         "best_submission_path": str(best_submission),

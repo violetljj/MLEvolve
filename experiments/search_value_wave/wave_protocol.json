@@ -1,6 +1,8 @@
 {
-  "protocol_id": "mlevolve-codex-search-value-wave-r1",
-  "frozen_at_utc": "2026-08-17T00:00:00Z",
+  "protocol_id": "mlevolve-codex-search-value-wave-r2",
+  "frozen_at_utc": "2026-08-17T05:40:00Z",
+  "supersedes_invalid_protocol": "mlevolve-codex-search-value-wave-r1",
+  "mechanical_amendment": "R1 stopped before any paired endpoint or private-test access: both implemented arms require 20 calls (2 setup plus 6x3), and selected MLEvolve code requires an offline no-LLM replay to persist validation predictions. Tasks, splits, order, budgets, endpoints, and verdict thresholds are unchanged.",
   "purpose": "Admission screen for incremental search value over the same strong Codex model; not an algorithm-superiority or product-readiness claim.",
   "prior_task_exclusions": [
     "sklearn_diabetes_fixed_split",
@@ -10,7 +12,7 @@
   "reasoning_effort": "medium",
   "replicates_per_task": 1,
   "formal_candidates_per_arm": 6,
-  "expected_codex_calls_per_arm": 19,
+  "expected_codex_calls_per_arm": 20,
   "candidate_timeout_seconds": 300,
   "arm_timeout_seconds": 1800,
   "cpu_threads": 8,
