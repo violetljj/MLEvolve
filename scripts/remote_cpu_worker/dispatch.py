@@ -23,10 +23,6 @@ def checked_name(label: str, value: str) -> str:
     return value
 
 
-def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(command, check=True, text=True, encoding="utf-8", errors="replace", **kwargs)
-
-
 def extract_results(archive: Path, destination: Path) -> None:
     destination = destination.resolve()
     with tarfile.open(archive, "r:gz") as handle:
@@ -74,7 +70,6 @@ def main() -> None:
         "-o", "ServerAliveCountMax=3",
     ]
     ssh = ["ssh", "-p", str(args.port), *connection_options, args.host]
-    scp = ["scp", "-P", str(args.port), *connection_options]
     remote_run = f"{REMOTE_BASE}/{project}/runs/{run_id}"
     runtime = Path(__file__).with_name("worker_runtime.py")
     with tempfile.TemporaryDirectory(prefix="remote-worker-") as temporary:
@@ -95,38 +90,40 @@ def main() -> None:
             json.dumps({"project": project, "run_id": run_id, "jobs": manifest_jobs}, indent=2),
             encoding="utf-8",
         )
+        shutil.copy2(runtime, stage / "worker_runtime.py")
         archive = Path(temporary) / "payload.tar.gz"
         with tarfile.open(archive, "w:gz") as handle:
             handle.add(stage, arcname=".")
-
-        run(ssh + [f"mkdir -p '{REMOTE_BASE}/{project}/runs' && mkdir '{remote_run}'"])
-        operation_succeeded = False
-        try:
-            run(scp + [str(archive), str(runtime), f"{args.host}:{remote_run}/"])
-            remote_command = (
-                f"cd '{remote_run}' && tar -xzf payload.tar.gz && "
-                f"flock -n '{REMOTE_BASE}/.cpu-worker.lock' "
-                f"'{args.remote_python}' worker_runtime.py --run-dir '{remote_run}' "
-                f"--python '{args.remote_python}' --concurrency {args.concurrency} "
-                f"--cpus-per-job {args.cpus_per_job} --timeout {args.timeout}"
+        cleanup_trap = f"trap \"rm -rf -- '{remote_run}'\" EXIT; " if args.cleanup_remote else ""
+        remote_command = (
+            f"set -eu; mkdir -p '{REMOTE_BASE}/{project}/runs'; mkdir '{remote_run}'; "
+            f"{cleanup_trap}cd '{remote_run}'; tar -xzf -; "
+            f"flock -n '{REMOTE_BASE}/.cpu-worker.lock' "
+            f"'{args.remote_python}' worker_runtime.py --run-dir '{remote_run}' "
+            f"--python '{args.remote_python}' --concurrency {args.concurrency} "
+            f"--cpus-per-job {args.cpus_per_job} --timeout {args.timeout} "
+            f"> worker.stdout.txt 2> worker.stderr.txt; cat results.tar.gz"
+        )
+        downloaded = Path(temporary) / "results.tar.gz"
+        with archive.open("rb") as upload, downloaded.open("wb") as download:
+            completed = subprocess.run(
+                ssh + [remote_command],
+                stdin=upload,
+                stdout=download,
+                stderr=subprocess.PIPE,
+                timeout=args.timeout + 180,
+                check=False,
             )
-            completed = run(ssh + [remote_command], capture_output=True)
-            args.results_root.mkdir(parents=True, exist_ok=False)
-            run(scp + [f"{args.host}:{remote_run}/results.tar.gz", str(args.results_root)])
-            extract_results(args.results_root / "results.tar.gz", args.results_root)
-            (args.results_root / "dispatch_stdout.txt").write_text(completed.stdout, encoding="utf-8")
-            operation_succeeded = True
-        finally:
-            if args.cleanup_remote:
-                cleanup = subprocess.run(
-                    ssh + [f"test '{remote_run}' != / && rm -rf -- '{remote_run}'"],
-                    check=False,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                if operation_succeeded and cleanup.returncode != 0:
-                    raise RuntimeError(f"Remote cleanup failed: {cleanup.stderr[-2000:]}")
+        if completed.returncode != 0:
+            error = completed.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"Remote worker stream failed: {error[-4000:]}")
+        args.results_root.mkdir(parents=True, exist_ok=False)
+        local_archive = args.results_root / "results.tar.gz"
+        shutil.copy2(downloaded, local_archive)
+        extract_results(local_archive, args.results_root)
+        (args.results_root / "dispatch_stderr.txt").write_text(
+            completed.stderr.decode("utf-8", errors="replace"), encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ Isolation rules:
 - The dispatcher never uploads private evaluator labels or the controller's Evidence Ledger.
 - Remote cleanup targets only the validated project/run path and is opt-in.
 - A host-wide `flock` lease permits only one CPU-saturating batch at a time, so separate projects fail fast instead of silently oversubscribing the same cores.
+- Upload, execution, result download, and optional exact cleanup share one SSH connection; no per-job SCP connections are opened.
 
 Example:
 

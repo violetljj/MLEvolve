@@ -1,4 +1,4 @@
-# MLEvolve × Codex Search-Value Wave R3
+# MLEvolve × Codex Search-Value Wave R3.1
 
 This directory freezes and runs the nine-task paired admission screen that follows
 the single diabetes result. The comparison is `VANILLA_CODEX` versus
@@ -23,6 +23,11 @@ candidate in both arms, and makes reproducibility a candidate-local eligibility 
 replaces the consumed `credit_g` task with frozen OpenML `pc1` before retrieving its
 data. Both arms dispatch candidate computation to the same stateless SSH worker;
 Codex, search state, evaluator authority, and private labels remain local.
+
+R3 then completed the first MLEvolve search but stopped before replay when the
+multi-connection SSH/SCP transport timed out. R3.1 uses one SSH stream for upload,
+execution, result download, and exact cleanup, and replaces consumed `pc1` with
+frozen OpenML `madelon` before retrieving its data.
 
 The protocol is intentionally fail-closed:
 
