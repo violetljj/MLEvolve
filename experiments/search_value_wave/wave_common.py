@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -84,3 +86,54 @@ def best_so_far(values: list[float | None], maximize: bool) -> list[float | None
                 best = value
         result.append(best)
     return result
+
+
+def codex_usage(call_dir: Path) -> dict:
+    """Return usage totals plus a timestamped cumulative token timeline."""
+    items = []
+    for path in call_dir.glob("call_*/metadata.json"):
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        usage = metadata.get("usage")
+        started = metadata.get("started_utc")
+        if not usage or not started:
+            continue
+        items.append((datetime.fromisoformat(started), usage, path.parent.name))
+    items.sort(key=lambda item: item[0])
+    cumulative_input = cumulative_cached = cumulative_output = 0
+    timeline = []
+    for started, usage, call_name in items:
+        cumulative_input += int(usage["input_tokens"])
+        cumulative_cached += int(usage.get("cached_input_tokens", 0))
+        cumulative_output += int(usage["output_tokens"])
+        timeline.append({
+            "call": call_name,
+            "started_utc": started.isoformat(),
+            "input_tokens": cumulative_input,
+            "cached_input_tokens": cumulative_cached,
+            "uncached_input_tokens": cumulative_input - cumulative_cached,
+            "output_tokens": cumulative_output,
+            "total_tokens": cumulative_input + cumulative_output,
+        })
+    return {
+        "calls": len(items),
+        "input_tokens": cumulative_input,
+        "cached_input_tokens": cumulative_cached,
+        "uncached_input_tokens": cumulative_input - cumulative_cached,
+        "output_tokens": cumulative_output,
+        "total_tokens": cumulative_input + cumulative_output,
+        "timeline": timeline,
+    }
+
+
+def cumulative_at(timeline: list[dict], completed_utc: datetime) -> dict:
+    eligible = [item for item in timeline if datetime.fromisoformat(item["started_utc"]) <= completed_utc]
+    if not eligible:
+        return {"total_tokens": 0, "uncached_input_tokens": 0}
+    return eligible[-1]
+
+
+def git_head(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60, check=True,
+    ).stdout.strip()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -49,17 +50,17 @@ def encode_target(target: pd.Series, problem_type: str) -> tuple[pd.Series, dict
     return encoded, {"kind": "class_index", "mapping": mapping}
 
 
-def dummy_baseline(metric: str, fit_y: pd.Series, validation_y: pd.Series) -> float:
+def dummy_baseline(metric: str, fit_y: pd.Series, evaluation_y: pd.Series) -> float:
     fit_x = np.zeros((len(fit_y), 1))
-    validation_x = np.zeros((len(validation_y), 1))
+    evaluation_x = np.zeros((len(evaluation_y), 1))
     if metric == "rmse":
         model = DummyRegressor(strategy="mean").fit(fit_x, fit_y)
-        return float(root_mean_squared_error(validation_y, model.predict(validation_x)))
+        return float(root_mean_squared_error(evaluation_y, model.predict(evaluation_x)))
     model = DummyClassifier(strategy="prior").fit(fit_x, fit_y)
     if metric == "roc_auc":
-        probability = model.predict_proba(validation_x)[:, 1]
-        return float(roc_auc_score(validation_y, probability))
-    return float(accuracy_score(validation_y, model.predict(validation_x)))
+        probability = model.predict_proba(evaluation_x)[:, 1]
+        return float(roc_auc_score(evaluation_y, probability))
+    return float(accuracy_score(evaluation_y, model.predict(evaluation_x)))
 
 
 def description(task: dict, seed: int, features: list[str], target_meta: dict) -> str:
@@ -95,7 +96,52 @@ The metric is {metric_text}. Write `./submission/submission.csv` and `./submissi
 """
 
 
-def prepare_task(root: Path, task: dict, protocol: dict) -> dict:
+def load_source(task: dict, task_root: Path, source_mode: str) -> tuple[pd.DataFrame, pd.Series, dict]:
+    if source_mode == "openml":
+        source = fetch_openml(data_id=task["openml_data_id"], as_frame=True, parser="auto")
+        return source.data.copy(), pd.Series(source.target), {
+            "transport": "openml_api",
+            "name": source.details.get("name"),
+            "version": source.details.get("version"),
+            "data_id": source.details.get("id"),
+        }
+    mirror = task_root / "source_mirror"
+    url = f"https://gitlab.com/data/d/openml/{task['openml_data_id']}.git"
+    completed = subprocess.run(
+        ["git", "clone", "--depth", "1", url, str(mirror)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=1800, check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"Datagit clone failed for {task['slug']}: {completed.stderr[-2000:]}")
+    metadata_path = mirror / "dataset" / "metadata.json"
+    table_path = mirror / "dataset" / "tables" / "data.csv"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))["data_set_description"]
+    if int(metadata["id"]) != task["openml_data_id"]:
+        raise ValueError(f"Datagit ID mismatch for {task['slug']}")
+    target_name = metadata.get("default_target_attribute")
+    table = pd.read_csv(table_path)
+    if not target_name or target_name not in table.columns:
+        raise ValueError(f"Missing default target for {task['slug']}: {target_name}")
+    commit = subprocess.run(
+        ["git", "-C", str(mirror), "rev-parse", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=60, check=True,
+    ).stdout.strip()
+    return table.drop(columns=[target_name]), table[target_name], {
+        "transport": "datagit_gitlab_mirror",
+        "repository": url,
+        "commit": commit,
+        "name": metadata.get("name"),
+        "version": metadata.get("version"),
+        "data_id": metadata.get("id"),
+        "openml_md5_checksum": metadata.get("md5_checksum"),
+        "mirror_data_csv_sha256": sha256(table_path),
+        "mirror_metadata_sha256": sha256(metadata_path),
+    }
+
+
+def prepare_task(root: Path, task: dict, protocol: dict, source_mode: str) -> dict:
     task_root = root / "tasks" / task["slug"]
     if task_root.exists():
         raise FileExistsError(f"Refusing to overwrite task root: {task_root}")
@@ -105,10 +151,9 @@ def prepare_task(root: Path, task: dict, protocol: dict) -> dict:
     for directory in (public, private, evidence):
         directory.mkdir(parents=True)
 
-    source = fetch_openml(data_id=task["openml_data_id"], as_frame=True, parser="auto")
-    features = source.data.copy()
+    features, source_target, source_receipt = load_source(task, task_root, source_mode)
     features.columns = safe_columns(list(features.columns))
-    target, target_meta = encode_target(source.target, task["problem_type"])
+    target, target_meta = encode_target(source_target, task["problem_type"])
     frame = features.reset_index(drop=True)
     frame.insert(0, "id", np.arange(len(frame), dtype=np.int64))
     frame["target"] = target.reset_index(drop=True)
@@ -151,14 +196,15 @@ def prepare_task(root: Path, task: dict, protocol: dict) -> dict:
         description(task, seed, list(features.columns), target_meta), encoding="utf-8"
     )
 
-    baseline = dummy_baseline(
+    validation_baseline = dummy_baseline(
         task["metric"], frame.iloc[fit_ids]["target"], frame.iloc[validation_ids]["target"]
+    )
+    test_baseline = dummy_baseline(
+        task["metric"], frame.iloc[development_ids]["target"], frame.iloc[test_ids]["target"]
     )
     receipt = {
         "task": task,
-        "source_name": source.details.get("name"),
-        "source_version": source.details.get("version"),
-        "source_data_id": source.details.get("id"),
+        "source": source_receipt,
         "seed": seed,
         "rows": len(frame),
         "features": len(features.columns),
@@ -166,7 +212,8 @@ def prepare_task(root: Path, task: dict, protocol: dict) -> dict:
         "validation_rows": len(validation_ids),
         "test_rows": len(test_ids),
         "target_encoding": target_meta,
-        "dummy_validation_score": baseline,
+        "dummy_validation_score": validation_baseline,
+        "dummy_test_score": test_baseline,
         "files": {},
     }
     for path in sorted((task_root / "benchmark").rglob("*")):
@@ -179,6 +226,7 @@ def prepare_task(root: Path, task: dict, protocol: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wave-root", type=Path, required=True)
+    parser.add_argument("--source", choices=("openml", "datagit"), default="openml")
     args = parser.parse_args()
     root = args.wave_root.resolve()
     if root.exists() and any(root.iterdir()):
@@ -190,7 +238,7 @@ def main() -> None:
     receipts = []
     try:
         for task in protocol["tasks"]:
-            receipts.append(prepare_task(root, task, protocol))
+            receipts.append(prepare_task(root, task, protocol, args.source))
     except Exception as exc:
         atomic_json(root / "PREPARATION_FAILED.json", {
             "protocol_sha256": sha256(protocol_copy),

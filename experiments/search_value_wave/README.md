@@ -24,6 +24,24 @@ The canonical Windows runtime root is outside Git, for example:
 `E:\MLEvolve-runtime\search-value-wave\r1`. Preparation and execution refuse to
 overwrite non-empty or consumed evidence roots.
 
+Canonical commands use the repository's Python 3.11 environment:
+
+```powershell
+$env:SEARCH_VALUE_PYTHON = 'E:\MLEvolve-runtime\.venv\Scripts\python.exe'
+& $env:SEARCH_VALUE_PYTHON experiments\search_value_wave\preflight.py `
+  --repo-root E:\MLEvolve `
+  --runtime-root E:\MLEvolve-runtime `
+  --output E:\MLEvolve-runtime\search-value-wave\preflight-r1.json
+& $env:SEARCH_VALUE_PYTHON experiments\search_value_wave\prepare_wave.py `
+  --wave-root E:\MLEvolve-runtime\search-value-wave\r1 `
+  --source datagit
+& $env:SEARCH_VALUE_PYTHON experiments\search_value_wave\run_wave.py `
+  --repo-root E:\MLEvolve `
+  --wave-root E:\MLEvolve-runtime\search-value-wave\r1
+& $env:SEARCH_VALUE_PYTHON experiments\search_value_wave\finalize_wave.py `
+  --wave-root E:\MLEvolve-runtime\search-value-wave\r1
+```
+
 ## Frozen execution sequence
 
 1. Commit the protocol before retrieving any task payload.
