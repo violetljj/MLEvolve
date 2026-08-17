@@ -1,12 +1,13 @@
 {
-  "protocol_id": "mlevolve-codex-search-value-wave-r2.2",
-  "frozen_at_utc": "2026-08-17T07:10:00Z",
-  "supersedes_invalid_protocol": "mlevolve-codex-search-value-wave-r2.1",
-  "mechanical_amendment": "R1 and R2 stopped before paired private-test evaluation while fixing call accounting and numeric replay validation. R2.1 completed the first dev pair, then the next Vanilla arm stopped because subprocess.TimeoutExpired escaped instead of consuming one invalid candidate. R2.2 records candidate timeout as invalid and continues the frozen six-candidate budget. Tasks, splits, order, budgets, endpoints, and verdict thresholds are unchanged; no private test has been accessed.",
+  "protocol_id": "mlevolve-codex-search-value-wave-r3",
+  "frozen_at_utc": "2026-08-17T07:40:03Z",
+  "supersedes_invalid_protocol": "mlevolve-codex-search-value-wave-r2.2",
+  "mechanical_amendment": "R2.2 stopped on the first MLEvolve arm before its paired Vanilla arm or any private-test access. All six development candidates executed, but a tied-best selection bound the selected code to a public best_submission copied from a different node. A no-LLM node-specific audit reproduced all six node submissions within 4.45e-16. R3 binds each node ID to its own submission_<node_id>.csv and makes replay eligibility candidate-local for both arms: every candidate is replayed without LLM calls, non-reproducible candidates are ineligible for final selection, and an arm is invalid only when it has no reproducible candidate or violates another frozen gate. The consumed credit_g task is excluded and replaced before source retrieval by pc1 (OpenML data ID 1068). Both arms use the same stateless SSH CPU worker with eight CPUs per sequential candidate. Budgets, endpoints, and verdict thresholds are unchanged.",
   "purpose": "Admission screen for incremental search value over the same strong Codex model; not an algorithm-superiority or product-readiness claim.",
   "prior_task_exclusions": [
     "sklearn_diabetes_fixed_split",
-    "breast_cancer_smoke"
+    "breast_cancer_smoke",
+    "credit_g_r2_2_consumed_invalid"
   ],
   "model": "gpt-5.6-sol",
   "reasoning_effort": "medium",
@@ -17,6 +18,16 @@
   "arm_timeout_seconds": 1800,
   "cpu_threads": 8,
   "gpu_count": 0,
+  "replay_max_abs_prediction_delta": 1e-12,
+  "execution_backend": {
+    "kind": "stateless_ssh_cpu_worker",
+    "config_file": "remote_worker.json",
+    "candidate_concurrency": 1,
+    "cpus_per_candidate": 8,
+    "private_labels_uploaded": false,
+    "host_lease": "exclusive_cpu_worker_flock",
+    "remote_cleanup": "exact_project_run_after_receipt"
+  },
   "split": {
     "fit_fraction": 0.6,
     "validation_fraction": 0.2,
@@ -35,8 +46,8 @@
   "tasks": [
     {
       "sequence": 1,
-      "slug": "credit_g",
-      "openml_data_id": 31,
+      "slug": "pc1",
+      "openml_data_id": 1068,
       "problem_type": "binary_classification",
       "metric": "roc_auc",
       "maximize": true,

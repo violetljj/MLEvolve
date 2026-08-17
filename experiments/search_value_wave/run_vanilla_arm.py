@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -15,10 +16,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from engine.remote_cpu import execute_remote, load_remote_config
 from wave_common import (
     atomic_json,
     best_so_far,
     codex_usage,
+    compare_prediction_files,
     cumulative_at,
     load_protocol,
     score_predictions,
@@ -83,20 +90,35 @@ def execute_candidate(code: str, candidate_dir: Path, public: Path, python: Path
         env[name] = "8"
     started = time.time()
     timed_out = False
-    try:
-        completed = subprocess.run(
-            [str(python), "candidate.py"], cwd=candidate_dir, env=env,
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=300, check=False,
+    remote_config = load_remote_config()
+    if remote_config is not None:
+        remote = execute_remote(
+            code=code,
+            working_dir=candidate_dir,
+            timeout=300,
+            label=candidate_dir.name,
+            config=remote_config,
         )
-        returncode = completed.returncode
-        output = completed.stdout + completed.stderr
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        returncode = -1
-        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        output = stdout + stderr + "\nCandidate timed out after 300 seconds.\n"
+        timed_out = remote.timed_out
+        returncode = remote.returncode
+        output = remote.stdout + remote.stderr
+        if timed_out:
+            output += "\nCandidate timed out after 300 seconds.\n"
+    else:
+        try:
+            completed = subprocess.run(
+                [str(python), "candidate.py"], cwd=candidate_dir, env=env,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=300, check=False,
+            )
+            returncode = completed.returncode
+            output = completed.stdout + completed.stderr
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            returncode = -1
+            stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            output = stdout + stderr + "\nCandidate timed out after 300 seconds.\n"
     elapsed = time.time() - started
     (candidate_dir / "execution.txt").write_text(output, encoding="utf-8")
     valid = returncode == 0 and not timed_out
@@ -241,8 +263,72 @@ Valid={result['valid']}; official fixed-validation score={result['score']}""",
             best_code = reviewed["code"]
             shutil.copytree(candidate_dir, arm / "best_candidate", dirs_exist_ok=True)
 
+    replay_audits = []
+    replay_tolerance = float(protocol["replay_max_abs_prediction_delta"])
+    for record in history:
+        candidate_index = record["candidate"]
+        candidate_dir = arm / "candidates" / f"candidate_{candidate_index:02d}"
+        replay_dir = arm / "replays" / f"candidate_{candidate_index:02d}"
+        replay = execute_candidate(
+            (candidate_dir / "candidate.py").read_text(encoding="utf-8"),
+            replay_dir,
+            public,
+            python,
+            task,
+        )
+        comparison = {"columns_match": False, "ids_match": False, "max_abs_prediction_delta": None}
+        try:
+            comparison = compare_prediction_files(
+                candidate_dir / "submission" / "submission.csv",
+                replay_dir / "submission" / "submission.csv",
+            )
+        except Exception as exc:
+            comparison["error"] = f"{type(exc).__name__}: {exc}"
+        score_matches = (
+            record["score"] is not None
+            and replay["score"] is not None
+            and abs(record["score"] - replay["score"]) <= 1e-8 * max(1.0, abs(record["score"]))
+        )
+        reproducible = bool(
+            record["valid"]
+            and replay["valid"]
+            and score_matches
+            and comparison["ids_match"]
+            and comparison["max_abs_prediction_delta"] is not None
+            and comparison["max_abs_prediction_delta"] <= replay_tolerance
+        )
+        audit = {
+            "candidate": candidate_index,
+            "reproducible": reproducible,
+            "original_score": record["score"],
+            "replay_score": replay["score"],
+            "replay_wall_seconds": replay["execution_wall_seconds"],
+            **comparison,
+        }
+        replay_audits.append(audit)
+        atomic_json(candidate_dir / "REPLAY_AUDIT.json", audit)
+
+    eligible = [
+        (record, audit)
+        for record, audit in zip(history, replay_audits)
+        if audit["reproducible"]
+    ]
+    if eligible:
+        selected_record, _ = max(
+            eligible,
+            key=lambda pair: pair[0]["score"] if task["maximize"] else -pair[0]["score"],
+        )
+        best_score = selected_record["score"]
+        selected_dir = arm / "candidates" / f"candidate_{selected_record['candidate']:02d}"
+        shutil.copytree(selected_dir, arm / "best_candidate", dirs_exist_ok=True)
+    else:
+        best_score = None
+
     usage = codex_usage(call_logs)
-    trajectory = [item["score"] if item["valid"] else None for item in history]
+    trajectory = [
+        item["score"] if audit["reproducible"] else None
+        for item, audit in zip(history, replay_audits)
+    ]
     best_trajectory = best_so_far(trajectory, task["maximize"])
     checkpoints = []
     for record, best in zip(history, best_trajectory):
@@ -262,11 +348,14 @@ Valid={result['valid']}; official fixed-validation score={result['score']}""",
         "arm": "VANILLA_CODEX", "task": task["slug"],
         "harness_git_head": os.environ.get("SEARCH_VALUE_HARNESS_COMMIT"),
         "status": "VALID" if valid_arm else "INVALID",
-        "candidates": len(history), "valid_candidates": sum(item["valid"] for item in history),
+        "candidates": len(history),
+        "valid_candidates": sum(audit["reproducible"] for audit in replay_audits),
         "best_validation_score": best_score, "trajectory": trajectory,
         "candidate_checkpoints": checkpoints,
         "wall_seconds": time.time() - arm_started,
         "candidate_compute_wall_seconds": sum(item["execution_wall_seconds"] for item in history),
+        "replay_compute_wall_seconds": sum(item["replay_wall_seconds"] for item in replay_audits),
+        "replay_audits": replay_audits,
         "usage": {key: value for key, value in usage.items() if key != "timeline"},
         "best_submission_sha256": sha256(arm / "best_candidate" / "submission" / "submission.csv") if best_score is not None else None,
     }

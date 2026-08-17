@@ -18,6 +18,7 @@ from wave_common import (
     atomic_json,
     best_so_far,
     codex_usage,
+    compare_prediction_files,
     cumulative_at,
     load_protocol,
     sha256,
@@ -100,6 +101,52 @@ def main() -> None:
         trajectory.append(float(value) if valid else None)
         finish = node.get("finish_time") or node.get("created_time")
         checkpoints_raw.append(finish)
+    raw_trajectory = trajectory
+    replay_tolerance = float(protocol["replay_max_abs_prediction_delta"])
+    workspace = journals[0].parents[1] / "workspace"
+    replay_audits = []
+    for index, (node, original_score) in enumerate(zip(nodes, raw_trajectory), 1):
+        replay_dir = arm / "replays" / f"candidate_{index:02d}"
+        replay = execute_candidate(
+            node["code"], replay_dir,
+            task_root / "benchmark" / "public", python, task,
+        )
+        original_submission = workspace / "submission" / f"submission_{node['id']}.csv"
+        replay_submission = replay_dir / "submission" / "submission.csv"
+        comparison = {"columns_match": False, "ids_match": False, "max_abs_prediction_delta": None}
+        try:
+            comparison = compare_prediction_files(original_submission, replay_submission)
+        except Exception as exc:
+            comparison["error"] = f"{type(exc).__name__}: {exc}"
+        score_matches = (
+            original_score is not None
+            and replay["score"] is not None
+            and abs(original_score - replay["score"]) <= 1e-8 * max(1.0, abs(original_score))
+        )
+        reproducible = bool(
+            original_score is not None
+            and replay["valid"]
+            and score_matches
+            and comparison["ids_match"]
+            and comparison["max_abs_prediction_delta"] is not None
+            and comparison["max_abs_prediction_delta"] <= replay_tolerance
+        )
+        replay_audits.append({
+            "candidate": index,
+            "node_id": node["id"],
+            "reproducible": reproducible,
+            "original_score": original_score,
+            "replay_score": replay["score"],
+            "replay_wall_seconds": replay["execution_wall_seconds"],
+            "original_submission_path": str(original_submission),
+            "replay_submission_sha256": sha256(replay_submission) if replay_submission.exists() else None,
+            **comparison,
+        })
+
+    trajectory = [
+        score if audit["reproducible"] else None
+        for score, audit in zip(raw_trajectory, replay_audits)
+    ]
     best_trajectory = best_so_far(trajectory, task["maximize"])
     usage = codex_usage(call_logs)
     checkpoints = []
@@ -117,65 +164,41 @@ def main() -> None:
             "total_tokens": token_state.get("total_tokens", 0),
             "uncached_input_tokens": token_state.get("uncached_input_tokens", 0),
         })
-    best_score = best_trajectory[-1] if best_trajectory else None
-    best_submission = journals[0].parents[1] / "workspace" / "best_submission" / "submission.csv"
-    replay_score = None
-    replay_wall = None
-    replay_submission_sha256 = None
-    replay_submission_ids_match = False
-    replay_submission_max_abs_diff = None
-    replay_error = None
-    try:
-        eligible = [
-            node for node, value in zip(nodes, trajectory)
-            if value is not None and abs(value - best_score) <= 1e-12 * max(1.0, abs(best_score))
-        ]
-        if not eligible:
-            raise ValueError("No journal node matches the selected best score")
-        replay_dir = arm / "selected_code_dev_replay"
-        replay = execute_candidate(
-            eligible[0]["code"], replay_dir,
-            task_root / "benchmark" / "public", python, task,
+    selected_audit = None
+    eligible = [
+        (audit, score)
+        for audit, score in zip(replay_audits, trajectory)
+        if score is not None
+    ]
+    if eligible:
+        selected_audit, best_score = max(
+            eligible,
+            key=lambda pair: pair[1] if task["maximize"] else -pair[1],
         )
-        replay_score = replay["score"] if replay["valid"] else None
-        replay_wall = replay["execution_wall_seconds"]
-        replay_submission = replay_dir / "submission" / "submission.csv"
-        replay_submission_sha256 = sha256(replay_submission) if replay_submission.exists() else None
-        original_frame = pd.read_csv(best_submission)
-        replay_frame = pd.read_csv(replay_submission)
-        replay_submission_ids_match = original_frame["id"].tolist() == replay_frame["id"].tolist()
-        original_values = pd.to_numeric(original_frame["prediction"], errors="coerce").to_numpy(float)
-        replay_values = pd.to_numeric(replay_frame["prediction"], errors="coerce").to_numpy(float)
-        if len(original_values) == len(replay_values) and np.isfinite(original_values).all() and np.isfinite(replay_values).all():
-            replay_submission_max_abs_diff = float(np.max(np.abs(original_values - replay_values)))
-    except Exception as exc:
-        replay_error = f"{type(exc).__name__}: {exc}"
+        best_submission = Path(selected_audit["original_submission_path"])
+    else:
+        best_score = None
+        best_submission = workspace / "best_submission" / "submission.csv"
     valid_arm = (
         completed.returncode == 0
         and len(nodes) == protocol["formal_candidates_per_arm"]
         and best_score is not None
-        and replay_score is not None
-        and abs(replay_score - best_score) <= 1e-8 * max(1.0, abs(best_score))
         and usage["calls"] == protocol["expected_codex_calls_per_arm"]
         and best_submission.exists()
-        and replay_submission_ids_match
-        and replay_submission_max_abs_diff is not None
-        and replay_submission_max_abs_diff <= 1e-12
     )
     terminal = {
         "arm": "MLEVOLVE_CODEX", "task": task["slug"],
         "harness_git_head": os.environ.get("SEARCH_VALUE_HARNESS_COMMIT"),
         "status": "VALID" if valid_arm else "INVALID",
         "candidates": len(nodes), "valid_candidates": sum(value is not None for value in trajectory),
-        "best_validation_score": best_score, "replayed_validation_score": replay_score,
+        "best_validation_score": best_score,
+        "replayed_validation_score": selected_audit["replay_score"] if selected_audit else None,
         "trajectory": trajectory, "stages": [node.get("stage") for node in nodes],
         "candidate_checkpoints": checkpoints, "wall_seconds": wall,
         "candidate_compute_wall_seconds": sum(float(node.get("exec_time") or 0) for node in nodes),
-        "selected_code_audit_replay_wall_seconds": replay_wall,
-        "selected_code_audit_replay_submission_sha256": replay_submission_sha256,
-        "selected_code_audit_replay_ids_match": replay_submission_ids_match,
-        "selected_code_audit_replay_max_abs_diff": replay_submission_max_abs_diff,
-        "selected_code_audit_replay_error": replay_error,
+        "replay_compute_wall_seconds": sum(item["replay_wall_seconds"] for item in replay_audits),
+        "replay_audits": replay_audits,
+        "selected_replay_audit": selected_audit,
         "usage": {key: value for key, value in usage.items() if key != "timeline"},
         "journal_sha256": sha256(journal_path),
         "best_submission_path": str(best_submission),

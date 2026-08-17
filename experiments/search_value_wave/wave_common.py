@@ -72,6 +72,29 @@ def score_predictions(metric: str, truth: pd.DataFrame, prediction_path: Path) -
     raise ValueError(f"Unsupported frozen metric: {metric}")
 
 
+def compare_prediction_files(original_path: Path, replay_path: Path) -> dict:
+    """Compare ordered prediction files without scoring private labels."""
+    original = pd.read_csv(original_path)
+    replay = pd.read_csv(replay_path)
+    columns_match = list(original.columns) == ["id", "prediction"] == list(replay.columns)
+    ids_match = columns_match and original["id"].tolist() == replay["id"].tolist()
+    maximum = None
+    if ids_match:
+        original_values = pd.to_numeric(original["prediction"], errors="coerce").to_numpy(float)
+        replay_values = pd.to_numeric(replay["prediction"], errors="coerce").to_numpy(float)
+        if (
+            len(original_values) == len(replay_values)
+            and np.isfinite(original_values).all()
+            and np.isfinite(replay_values).all()
+        ):
+            maximum = float(np.max(np.abs(original_values - replay_values))) if len(original_values) else 0.0
+    return {
+        "columns_match": columns_match,
+        "ids_match": ids_match,
+        "max_abs_prediction_delta": maximum,
+    }
+
+
 def normalized_gain(score: float, baseline: float, maximize: bool) -> float:
     direction = 1.0 if maximize else -1.0
     return direction * (score - baseline) / max(abs(baseline), 1e-12)

@@ -1,4 +1,4 @@
-# MLEvolve × Codex Search-Value Wave R2.2
+# MLEvolve × Codex Search-Value Wave R3
 
 This directory freezes and runs the nine-task paired admission screen that follows
 the single diabetes result. The comparison is `VANILLA_CODEX` versus
@@ -15,8 +15,14 @@ byte-for-byte; inspection showed only roughly 1e-16 floating serialization drift
 R2.1 keeps the original submission hash immutable and uses ID equality plus a
 `1e-12` maximum numeric replay tolerance.
 R2.1 later stopped before private evaluation when a Vanilla candidate timeout
-escaped the arm runner. R2.2 consumes such a timeout as one invalid candidate and
-continues the already-frozen six-candidate budget.
+escaped the arm runner. R2.2 consumed such a timeout as one invalid candidate, but
+its first MLEvolve arm bound tied-best code to a `best_submission` copied from a
+different node. A node-specific no-LLM audit reproduced all six candidates within
+numeric tolerance. R3 binds code to `submission_<node_id>.csv`, replays every
+candidate in both arms, and makes reproducibility a candidate-local eligibility gate. It also
+replaces the consumed `credit_g` task with frozen OpenML `pc1` before retrieving its
+data. Both arms dispatch candidate computation to the same stateless SSH worker;
+Codex, search state, evaluator authority, and private labels remain local.
 
 The protocol is intentionally fail-closed:
 
@@ -26,6 +32,9 @@ The protocol is intentionally fail-closed:
 - preparation records exact OpenML and generated-file hashes;
 - an unavailable task is not replaced after seeing data or outcomes;
 - private labels are not consumed until all 18 arm receipts exist;
+- only `candidate.py` and public `input/` cross the SSH boundary;
+- each sequential candidate receives eight remote logical CPUs under an exclusive
+  host lease, and its exact remote run directory is cleaned only after receipt;
 - one task run per arm is an admission screen, not a stochastic-effect estimate.
 
 Two questions remain separate. Equal candidate count tests whether search structure

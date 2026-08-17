@@ -20,6 +20,8 @@ from pathlib import Path
 import humanize
 from dataclasses_json import DataClassJsonMixin
 
+from engine.remote_cpu import execute_remote, load_remote_config
+
 logger = logging.getLogger("MLEvolve")
 
 @dataclass
@@ -220,6 +222,46 @@ class Interpreter:
             run_wd.mkdir(parents=True, exist_ok=True)
             with open(runfile_path, "w") as f:
                 f.write(code)
+
+            remote_config = load_remote_config()
+            if remote_config is not None:
+                logger.info("REPL is dispatching code to the configured SSH CPU worker")
+                remote = execute_remote(
+                    code=code,
+                    working_dir=run_wd,
+                    timeout=self.timeout,
+                    label=f"slot-{process_id}-{id}",
+                    config=remote_config,
+                )
+                output = []
+                if remote.stdout:
+                    output.extend(remote.stdout.splitlines(keepends=True))
+                if remote.stderr:
+                    output.extend(remote.stderr.splitlines(keepends=True))
+                if not output:
+                    output = [""]
+                if output[-1] and not output[-1].endswith("\n"):
+                    output.append("\n")
+                exc_type = (
+                    "TimeoutError" if remote.timed_out
+                    else "RuntimeError" if remote.returncode != 0
+                    else None
+                )
+                if exc_type == "TimeoutError":
+                    output.append(
+                        f"Execution time: TimeoutError: Execution exceeded the time limit of {humanize.naturaldelta(self.timeout)}"
+                    )
+                else:
+                    output.append(
+                        f"Execution time: {humanize.naturaldelta(remote.wall_seconds)} seconds (time limit is {humanize.naturaldelta(self.timeout)})."
+                    )
+                return ExecutionResult(
+                    output,
+                    remote.wall_seconds,
+                    exc_type,
+                    {} if exc_type else None,
+                    [] if exc_type else None,
+                )
 
             cmd = [sys.executable, str(runfile_path)]
             proc = subprocess.Popen(

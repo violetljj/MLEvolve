@@ -20,7 +20,9 @@ python scripts/remote_cpu_worker/dispatch.py `
   --project mlevolve --run-id wave-r3-canary-001 `
   --jobs-root E:\candidate-batch --results-root E:\candidate-results `
   --remote-python /root/autodl-tmp/workers/mlevolve/envs/cpu-py311/bin/python `
-  --concurrency 32 --timeout 300
+  --concurrency 32 --cpus-per-job 1 --timeout 300
 ```
 
 Do not use this backend in an already-started frozen experiment. Register the execution backend, remote environment fingerprint, concurrency, CPU/thread limits, timeout, artifact allowlist, and failure semantics before a new formal wave begins.
+
+For an eight-thread sequential candidate budget, use `--concurrency 1 --cpus-per-job 8`.

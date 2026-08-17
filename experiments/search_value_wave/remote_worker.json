@@ -1,0 +1,8 @@
+{
+  "host": "root@connect.westb.seetacloud.com",
+  "port": 16288,
+  "project": "mlevolve",
+  "run_prefix": "wave-r3",
+  "remote_python": "/root/autodl-tmp/workers/mlevolve/envs/cpu-py311/bin/python",
+  "cpus_per_job": 8
+}

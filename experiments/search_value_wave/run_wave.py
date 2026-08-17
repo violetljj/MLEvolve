@@ -26,6 +26,10 @@ def main() -> None:
     repo = args.repo_root.resolve()
     root = args.wave_root.resolve()
     protocol = load_protocol()
+    remote_config_path = Path(__file__).with_name(protocol["execution_backend"]["config_file"])
+    remote_config = json.loads(remote_config_path.read_text(encoding="utf-8"))
+    if int(remote_config["cpus_per_job"]) != int(protocol["cpu_threads"]):
+        raise SystemExit("Remote worker CPU allocation differs from frozen protocol")
     if not (root / "PREPARATION_COMPLETE.json").exists():
         raise SystemExit("Wave preparation is not complete")
     frozen = root / "FROZEN_PROTOCOL.json"
@@ -43,14 +47,18 @@ def main() -> None:
         frozen_start = json.loads(execution_start.read_text(encoding="utf-8"))
         if frozen_start["harness_git_head"] != head:
             raise SystemExit("Harness commit changed after formal execution started")
+        if frozen_start["remote_worker_config_sha256"] != sha256(remote_config_path):
+            raise SystemExit("Remote worker configuration changed after formal execution started")
     else:
         atomic_json(execution_start, {
             "protocol_id": protocol["protocol_id"],
             "protocol_sha256": sha256(frozen), "harness_git_head": head,
+            "remote_worker_config_sha256": sha256(remote_config_path),
         })
     python = Path(os.environ["SEARCH_VALUE_PYTHON"])
     child_env = os.environ.copy()
     child_env["SEARCH_VALUE_HARNESS_COMMIT"] = head
+    child_env["MLEVOLVE_REMOTE_WORKER_JSON"] = json.dumps(remote_config)
     for task in protocol["tasks"]:
         task_root = root / "tasks" / task["slug"]
         order = [task["first_arm"], "VANILLA_CODEX" if task["first_arm"] == "MLEVOLVE_CODEX" else "MLEVOLVE_CODEX"]

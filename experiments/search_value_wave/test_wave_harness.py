@@ -14,7 +14,14 @@ import pandas as pd
 from finalize_wave import candidate_auc, sign_test_p_one_sided, token_auc
 from prepare_wave import dummy_baseline, encode_target, safe_columns
 from run_vanilla_arm import execute_candidate
-from wave_common import best_so_far, load_protocol, normalized_gain, score_predictions, sha256
+from wave_common import (
+    best_so_far,
+    compare_prediction_files,
+    load_protocol,
+    normalized_gain,
+    score_predictions,
+    sha256,
+)
 
 
 class WaveHarnessTests(unittest.TestCase):
@@ -30,6 +37,17 @@ class WaveHarnessTests(unittest.TestCase):
     def test_best_so_far_respects_metric_direction(self) -> None:
         self.assertEqual(best_so_far([3.0, None, 2.0, 2.5], False), [3.0, 3.0, 2.0, 2.0])
         self.assertEqual(best_so_far([0.5, 0.4, None, 0.7], True), [0.5, 0.5, 0.5, 0.7])
+
+    def test_prediction_replay_comparison_is_candidate_local(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original.csv"
+            replay = root / "replay.csv"
+            pd.DataFrame({"id": [1, 2], "prediction": [0.1, 0.9]}).to_csv(original, index=False)
+            pd.DataFrame({"id": [1, 2], "prediction": [0.1, 0.8]}).to_csv(replay, index=False)
+            comparison = compare_prediction_files(original, replay)
+            self.assertTrue(comparison["ids_match"])
+            self.assertAlmostEqual(comparison["max_abs_prediction_delta"], 0.1)
 
     def test_exact_sign_test_threshold_is_frozen(self) -> None:
         self.assertAlmostEqual(sign_test_p_one_sided(8, 1), 10 / 512)

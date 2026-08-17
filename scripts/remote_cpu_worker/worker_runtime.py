@@ -26,21 +26,22 @@ def file_hash(path: Path) -> str | None:
     return digest.hexdigest()
 
 
-def run_job(job_dir: Path, python: Path, timeout: int, cpu_id: int) -> dict:
+def run_job(job_dir: Path, python: Path, timeout: int, cpu_ids: list[int]) -> dict:
+    thread_count = str(len(cpu_ids))
     env = os.environ.copy()
     env.update({
-        "OMP_NUM_THREADS": "1",
-        "MKL_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1",
-        "NUMEXPR_NUM_THREADS": "1",
-        "VECLIB_MAXIMUM_THREADS": "1",
+        "OMP_NUM_THREADS": thread_count,
+        "MKL_NUM_THREADS": thread_count,
+        "OPENBLAS_NUM_THREADS": thread_count,
+        "NUMEXPR_NUM_THREADS": thread_count,
+        "VECLIB_MAXIMUM_THREADS": thread_count,
         "PYTHONUNBUFFERED": "1",
     })
     started = time.time()
     taskset = shutil.which("taskset")
     command = [str(python), "candidate.py"]
     if taskset:
-        command = [taskset, "-c", str(cpu_id), *command]
+        command = [taskset, "-c", ",".join(map(str, cpu_ids)), *command]
     proc = subprocess.Popen(
         command,
         cwd=job_dir,
@@ -68,7 +69,7 @@ def run_job(job_dir: Path, python: Path, timeout: int, cpu_id: int) -> dict:
     (job_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     result = {
         "job_id": job_dir.name,
-        "cpu_id": cpu_id,
+        "cpu_ids": cpu_ids,
         "returncode": proc.returncode,
         "timed_out": timed_out,
         "wall_seconds": elapsed,
@@ -97,6 +98,7 @@ def main() -> None:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--concurrency", type=int, required=True)
+    parser.add_argument("--cpus-per-job", type=int, required=True)
     parser.add_argument("--timeout", type=int, required=True)
     args = parser.parse_args()
 
@@ -106,13 +108,26 @@ def main() -> None:
     available = sorted(os.sched_getaffinity(0))
     if not jobs:
         raise SystemExit("No candidate jobs found")
-    if not 1 <= args.concurrency <= len(available):
-        raise SystemExit(f"concurrency must be within 1..{len(available)}")
+    if args.concurrency < 1 or args.cpus_per_job < 1:
+        raise SystemExit("concurrency and cpus-per-job must be positive")
+    if args.concurrency * args.cpus_per_job > len(available):
+        raise SystemExit(
+            f"requested {args.concurrency * args.cpus_per_job} CPUs, only {len(available)} available"
+        )
 
     results = []
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
         futures = {
-            pool.submit(run_job, job, args.python, args.timeout, available[index % args.concurrency]): job
+            pool.submit(
+                run_job,
+                job,
+                args.python,
+                args.timeout,
+                available[
+                    (index % args.concurrency) * args.cpus_per_job:
+                    (index % args.concurrency + 1) * args.cpus_per_job
+                ],
+            ): job
             for index, job in enumerate(jobs)
         }
         for future in as_completed(futures):
@@ -123,6 +138,7 @@ def main() -> None:
         "host": os.uname().nodename,
         "logical_cpus": len(available),
         "concurrency": args.concurrency,
+        "cpus_per_job": args.cpus_per_job,
         "timeout_seconds": args.timeout,
         "python": str(args.python),
         "jobs": results,
