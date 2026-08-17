@@ -1,0 +1,141 @@
+{
+  "protocol_id": "mlevolve-codex-search-value-wave-r1",
+  "frozen_at_utc": "2026-08-17T00:00:00Z",
+  "purpose": "Admission screen for incremental search value over the same strong Codex model; not an algorithm-superiority or product-readiness claim.",
+  "prior_task_exclusions": [
+    "sklearn_diabetes_fixed_split",
+    "breast_cancer_smoke"
+  ],
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "medium",
+  "replicates_per_task": 1,
+  "formal_candidates_per_arm": 6,
+  "expected_codex_calls_per_arm": 19,
+  "candidate_timeout_seconds": 300,
+  "arm_timeout_seconds": 1800,
+  "cpu_threads": 8,
+  "gpu_count": 0,
+  "split": {
+    "fit_fraction": 0.6,
+    "validation_fraction": 0.2,
+    "test_fraction": 0.2,
+    "base_seed": 170817,
+    "stratify_classification": true
+  },
+  "normalization": {
+    "formula": "direction * (candidate_score - frozen_dummy_baseline_score) / max(abs(frozen_dummy_baseline_score), 1e-12)",
+    "direction": {
+      "maximize": 1,
+      "minimize": -1
+    },
+    "practical_tie_band": 0.01
+  },
+  "tasks": [
+    {
+      "sequence": 1,
+      "slug": "credit_g",
+      "openml_data_id": 31,
+      "problem_type": "binary_classification",
+      "metric": "roc_auc",
+      "maximize": true,
+      "first_arm": "MLEVOLVE_CODEX"
+    },
+    {
+      "sequence": 2,
+      "slug": "house_sales",
+      "openml_data_id": 42092,
+      "problem_type": "regression",
+      "metric": "rmse",
+      "maximize": false,
+      "first_arm": "VANILLA_CODEX"
+    },
+    {
+      "sequence": 3,
+      "slug": "vehicle",
+      "openml_data_id": 54,
+      "problem_type": "multiclass_classification",
+      "metric": "accuracy",
+      "maximize": true,
+      "first_arm": "VANILLA_CODEX"
+    },
+    {
+      "sequence": 4,
+      "slug": "electricity",
+      "openml_data_id": 151,
+      "problem_type": "binary_classification",
+      "metric": "roc_auc",
+      "maximize": true,
+      "first_arm": "MLEVOLVE_CODEX"
+    },
+    {
+      "sequence": 5,
+      "slug": "ames_housing",
+      "openml_data_id": 42165,
+      "problem_type": "regression",
+      "metric": "rmse",
+      "maximize": false,
+      "first_arm": "MLEVOLVE_CODEX"
+    },
+    {
+      "sequence": 6,
+      "slug": "phoneme",
+      "openml_data_id": 1489,
+      "problem_type": "binary_classification",
+      "metric": "roc_auc",
+      "maximize": true,
+      "first_arm": "VANILLA_CODEX"
+    },
+    {
+      "sequence": 7,
+      "slug": "brazilian_houses",
+      "openml_data_id": 42688,
+      "problem_type": "regression",
+      "metric": "rmse",
+      "maximize": false,
+      "first_arm": "VANILLA_CODEX"
+    },
+    {
+      "sequence": 8,
+      "slug": "bank_marketing",
+      "openml_data_id": 1461,
+      "problem_type": "binary_classification",
+      "metric": "roc_auc",
+      "maximize": true,
+      "first_arm": "MLEVOLVE_CODEX"
+    },
+    {
+      "sequence": 9,
+      "slug": "bike_sharing_demand",
+      "openml_data_id": 42712,
+      "problem_type": "regression",
+      "metric": "rmse",
+      "maximize": false,
+      "first_arm": "VANILLA_CODEX"
+    }
+  ],
+  "primary_endpoints": [
+    "win_tie_loss_at_practical_tie_band",
+    "median_final_normalized_delta_mlevolve_minus_vanilla",
+    "paired_exact_sign_test"
+  ],
+  "secondary_endpoints": [
+    "median_candidate_axis_anytime_auc_delta",
+    "quality_at_equal_token_budget",
+    "total_input_cached_input_output_and_uncached_input_tokens",
+    "wall_seconds",
+    "candidate_compute_wall_seconds",
+    "invalid_candidate_rate"
+  ],
+  "quality_verdicts": {
+    "MLEVOLVE_SEARCH_VALUE_ADMIT": "all 9 pairs valid; at least 8 practical wins; median final normalized delta > 0.01; one-sided exact sign-test p < 0.05",
+    "MLEVOLVE_SEARCH_VALUE_CONDITIONAL_ADMIT": "all 9 pairs valid; at least 6 practical wins; median final normalized delta > 0.01; ADMIT not reached",
+    "MLEVOLVE_SEARCH_VALUE_REJECT_FOR_INTEGRATION": "all 9 pairs valid and either at least 6 practical losses or median final normalized delta <= 0",
+    "MLEVOLVE_SEARCH_VALUE_NOT_ESTABLISHED": "all other valid completed outcomes",
+    "WAVE_NOT_EVALUABLE": "any task pair missing, invalid, overwritten, test-evaluated early, or outside frozen budget"
+  },
+  "authority": {
+    "test_access": "Test labels are inaccessible to both arms and are scored once only after all 18 arms have terminal receipts.",
+    "no_replacement": "A failed or unavailable frozen task is not replaced; the wave becomes WAVE_NOT_EVALUABLE.",
+    "claim_ceiling": "One run per task supports a heterogeneous admission screen only; it does not separate within-task agent stochasticity or establish general algorithm superiority."
+  }
+}
