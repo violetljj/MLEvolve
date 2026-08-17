@@ -1,4 +1,4 @@
-# MLEvolve × Codex Search-Value Wave R2.1
+# MLEvolve × Codex Search-Value Wave R2.2
 
 This directory freezes and runs the nine-task paired admission screen that follows
 the single diabetes result. The comparison is `VANILLA_CODEX` versus
@@ -14,6 +14,9 @@ R2 then stopped because that replay was required to match the selected test CSV
 byte-for-byte; inspection showed only roughly 1e-16 floating serialization drift.
 R2.1 keeps the original submission hash immutable and uses ID equality plus a
 `1e-12` maximum numeric replay tolerance.
+R2.1 later stopped before private evaluation when a Vanilla candidate timeout
+escaped the arm runner. R2.2 consumes such a timeout as one invalid candidate and
+continues the already-frozen six-candidate budget.
 
 The protocol is intentionally fail-closed:
 

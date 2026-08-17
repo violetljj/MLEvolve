@@ -13,6 +13,7 @@ import pandas as pd
 
 from finalize_wave import candidate_auc, sign_test_p_one_sided, token_auc
 from prepare_wave import dummy_baseline, encode_target, safe_columns
+from run_vanilla_arm import execute_candidate
 from wave_common import best_so_far, load_protocol, normalized_gain, score_predictions, sha256
 
 
@@ -49,6 +50,21 @@ class WaveHarnessTests(unittest.TestCase):
         self.assertEqual(metadata["mapping"], {"no": 0, "yes": 1})
         baseline = dummy_baseline("accuracy", pd.Series([0, 0, 1]), pd.Series([0, 1]))
         self.assertEqual(baseline, 0.5)
+
+    def test_candidate_timeout_is_consumed_as_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            public = root / "public"
+            public.mkdir()
+            pd.DataFrame({"id": [1, 2], "partition": ["fit", "validation"], "x": [0, 1], "target": [0.0, 1.0]}).to_csv(public / "train.csv", index=False)
+            pd.DataFrame({"id": [3], "x": [2]}).to_csv(public / "test.csv", index=False)
+            import unittest.mock
+            timeout = subprocess.TimeoutExpired([sys.executable, "candidate.py"], 300, output="partial")
+            with unittest.mock.patch("run_vanilla_arm.subprocess.run", side_effect=timeout):
+                result = execute_candidate("pass", root / "candidate", public, Path(sys.executable), {"metric": "rmse"})
+            self.assertFalse(result["valid"])
+            self.assertTrue(result["timed_out"])
+            self.assertEqual(result["returncode"], -1)
 
     def test_private_finalizer_audits_all_pairs_then_consumes_once(self) -> None:
         protocol = load_protocol()

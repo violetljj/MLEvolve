@@ -82,15 +82,24 @@ def execute_candidate(code: str, candidate_dir: Path, public: Path, python: Path
     for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         env[name] = "8"
     started = time.time()
-    completed = subprocess.run(
-        [str(python), "candidate.py"], cwd=candidate_dir, env=env,
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=300, check=False,
-    )
+    timed_out = False
+    try:
+        completed = subprocess.run(
+            [str(python), "candidate.py"], cwd=candidate_dir, env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=300, check=False,
+        )
+        returncode = completed.returncode
+        output = completed.stdout + completed.stderr
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        returncode = -1
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        output = stdout + stderr + "\nCandidate timed out after 300 seconds.\n"
     elapsed = time.time() - started
-    output = completed.stdout + completed.stderr
     (candidate_dir / "execution.txt").write_text(output, encoding="utf-8")
-    valid = completed.returncode == 0
+    valid = returncode == 0 and not timed_out
     score = None
     try:
         train = pd.read_csv(public / "train.csv")
@@ -110,7 +119,8 @@ def execute_candidate(code: str, candidate_dir: Path, public: Path, python: Path
         score = None
     return {
         "valid": bool(valid), "score": score if valid else None,
-        "returncode": completed.returncode, "execution_wall_seconds": elapsed,
+        "returncode": returncode, "timed_out": timed_out,
+        "execution_wall_seconds": elapsed,
         "completed_utc": datetime.now(timezone.utc).isoformat(), "output": output[-12000:],
     }
 
